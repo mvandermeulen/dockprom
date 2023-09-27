@@ -1,10 +1,7 @@
-dockprom
-========
+# dockprom
 
 A monitoring solution for Docker hosts and containers with [Prometheus](https://prometheus.io/), [Grafana](http://grafana.org/), [cAdvisor](https://github.com/google/cadvisor),
 [NodeExporter](https://github.com/prometheus/node_exporter) and alerting with [AlertManager](https://github.com/prometheus/alertmanager).
-
-***If you're looking for the Docker Swarm version please go to [stefanprodan/swarmprom](https://github.com/stefanprodan/swarmprom)***
 
 ## Install
 
@@ -14,13 +11,20 @@ Clone this repository on your Docker host, cd into dockprom directory and run co
 git clone https://github.com/stefanprodan/dockprom
 cd dockprom
 
-ADMIN_USER=admin ADMIN_PASSWORD=admin docker-compose up -d
+ADMIN_USER='admin' ADMIN_PASSWORD='admin' ADMIN_PASSWORD_HASH='$2a$14$1l.IozJx7xQRVmlkEQ32OeEEfP5mRxTpbDTCTcXRqn19gXD8YK1pO' docker-compose up -d
 ```
+
+**Caddy v2 does not accept plaintext passwords. It MUST be provided as a hash value. The above password hash corresponds to ADMIN_PASSWORD 'admin'. To know how to generate hash password, refer [Updating Caddy to v2](#Updating-Caddy-to-v2)**
 
 Prerequisites:
 
 * Docker Engine >= 1.13
 * Docker Compose >= 1.11
+
+## Updating Caddy to v2
+
+Perform a `docker run --rm caddy caddy hash-password --plaintext 'ADMIN_PASSWORD'` in order to generate a hash for your new password.
+ENSURE that you replace `ADMIN_PASSWORD` with new plain text password and `ADMIN_PASSWORD_HASH` with the hashed password references in [docker-compose.yml](./docker-compose.yml) for the caddy container.
 
 Containers:
 
@@ -35,21 +39,25 @@ Containers:
 ## Setup Grafana
 
 Navigate to `http://<host-ip>:3000` and login with user ***admin*** password ***admin***. You can change the credentials in the compose file or by supplying the `ADMIN_USER` and `ADMIN_PASSWORD` environment variables on compose up. The config file can be added directly in grafana part like this
-```
+
+```yaml
 grafana:
-  image: grafana/grafana:5.2.4
+  image: grafana/grafana:7.2.0
   env_file:
     - config
+```
 
-```
 and the config file format should have this content
-```
+
+```yaml
 GF_SECURITY_ADMIN_USER=admin
 GF_SECURITY_ADMIN_PASSWORD=changeme
 GF_USERS_ALLOW_SIGN_UP=false
 ```
+
 If you want to change the password, you have to remove this entry, otherwise the change will not take effect
-```
+
+```yaml
 - grafana_data:/var/lib/grafana
 ```
 
@@ -57,7 +65,7 @@ Grafana is preconfigured with dashboards and Prometheus as the default data sour
 
 * Name: Prometheus
 * Type: Prometheus
-* Url: http://prometheus:9090
+* Url: [http://prometheus:9090](http://prometheus:9090)
 * Access: proxy
 
 ***Docker Host Dashboard***
@@ -75,15 +83,19 @@ The Docker Host Dashboard shows key metrics for monitoring the resource usage of
 * Swap usage and activity graphs
 
 For storage and particularly Free Storage graph, you have to specify the fstype in grafana graph request.
-You can find it in `grafana/dashboards/docker_host.json`, at line 480 :
+You can find it in `grafana/provisioning/dashboards/docker_host.json`, at line 480 :
 
-      "expr": "sum(node_filesystem_free_bytes{fstype=\"btrfs\"})",
+```yaml
+"expr": "sum(node_filesystem_free_bytes{fstype=\"btrfs\"})",
+```
 
 I work on BTRFS, so i need to change `aufs` to `btrfs`.
 
 You can find right value for your system in Prometheus `http://<host-ip>:9090` launching this request :
 
-      node_filesystem_free_bytes
+```yaml
+node_filesystem_free_bytes
+```
 
 ***Docker Containers Dashboard***
 
@@ -100,6 +112,22 @@ The Docker Containers Dashboard shows key metrics for monitoring running contain
 * Container network outbound usage graph
 
 Note that this dashboard doesn't show the containers that are part of the monitoring stack.
+
+For storage and particularly Storage Load graph, you have to specify the fstype in grafana graph request.
+You can find it in `grafana/provisioning/dashboards/docker_containers.json`, at line 406 :
+
+```yaml
+"expr": "(node_filesystem_size_bytes{fstype=\"btrfs\"} - node_filesystem_free_bytes{fstype=\"btrfs\"}) / node_filesystem_size_bytes{fstype=\"btrfs\"}  * 100"，
+```
+
+I work on BTRFS, so i need to change `aufs` to `btrfs`.
+
+You can find right value for your system in Prometheus `http://<host-ip>:9090` launching this request :
+
+```yaml
+node_filesystem_size_bytes
+node_filesystem_free_bytes
+```
 
 ***Monitor Services Dashboard***
 
@@ -126,7 +154,7 @@ Three alert groups have been setup within the [alert.rules](https://github.com/s
 
 You can modify the alert rules and reload them by making a HTTP POST call to Prometheus:
 
-```
+```bash
 curl -X POST http://admin:admin@<host-ip>:9090/-/reload
 ```
 
@@ -266,7 +294,9 @@ The [pushgateway](https://github.com/prometheus/pushgateway) is used to collect 
 
 To push data, simply execute:
 
-    echo "some_metric 3.14" | curl --data-binary @- http://user:password@localhost:9091/metrics/job/some_job
+```bash
+echo "some_metric 3.14" | curl --data-binary @- http://user:password@localhost:9091/metrics/job/some_job
+```
 
 Please replace the `user:password` part with your user and password set in the initial configuration (default: `admin:admin`).
 
@@ -280,16 +310,17 @@ Please replace the `user:password` part with your user and password set in the i
 |  \>= 5.1 | grafana |   472   |
 
 There are two possible solutions to this problem.
-- Change ownership from 104 to 472
-- Start the upgraded container as user 104
 
-##### Specifying a user in docker-compose.yml
+1. Change ownership from 104 to 472
+2. Start the upgraded container as user 104
+
+## Specifying a user in docker-compose.yml
 
 To change ownership of the files run your grafana container as root and modify the permissions.
 
 First perform a `docker-compose down` then modify your docker-compose.yml to include the `user: root` option:
 
-```
+```yaml
   grafana:
     image: grafana/grafana:5.2.2
     container_name: grafana
@@ -315,7 +346,7 @@ First perform a `docker-compose down` then modify your docker-compose.yml to inc
 
 Perform a `docker-compose up -d` and then issue the following commands:
 
-```
+```bash
 docker exec -it --user root grafana bash
 
 # in the container you just started:
@@ -327,7 +358,7 @@ chown -R grafana:grafana /usr/share/grafana
 
 To run the grafana container as `user: 104` change your `docker-compose.yml` like such:
 
-```
+```yaml
   grafana:
     image: grafana/grafana:5.2.2
     container_name: grafana
